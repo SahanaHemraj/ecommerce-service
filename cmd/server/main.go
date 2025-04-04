@@ -1,34 +1,51 @@
 package main
 
 import (
-    "github.com/gin-gonic/gin"
-    "ecommerce-website/internal/product"
-    "ecommerce-website/internal/order"
-    "ecommerce-website/internal/user"
+	"context"
+	"ecommerce-service/internal/app/server/handler"
+	"ecommerce-service/internal/app/server/routers"
 	"log"
-	"ecommerce-website/internal/database"
-
+	"net/http"
+	"os"
+	"os/signal"
+	"time"
 )
+
+func gracefulShutdown(srv *http.Server) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Print("Gin server shutting down....")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("Gin server forced to shutdown: %v\n", err)
+	} else {
+		log.Print("Gin server existing")
+	}
+}
 
 func main() {
 
-	database.InitDB()
-	database.Migrate()
+	// database.InitDB()
+	// database.Migrate()
 
-    r := gin.Default()
+	h := handler.NewHandler(int32(200), int32(0))
 
-    // Routes for products, orders, and users
-    r.GET("/products", product.GetAllProducts)
-    r.POST("/products", product.AddProduct)
+	serviceRouter := routers.NewRouter(h.Routes())
 
-    r.GET("/orders", order.GetAllOrders)
-    r.POST("/orders", order.PlaceOrder)
+	srv := &http.Server{
+		Addr:    ":5000",
+		Handler: serviceRouter,
+	}
 
-    r.POST("/signup", user.SignUp)
-    r.POST("/login", user.Login)
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("unable to run gin service server: %v", err)
+		}
+	}()
 
-    // Static files for frontend (e.g., CSS, JS)
-    r.Static("/static", "./static")
-
-    r.Run(":8080") // Listen on port 8080
+	gracefulShutdown(srv)
 }
